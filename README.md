@@ -1,9 +1,9 @@
 # Parallel Hash Table Server-Client System
 
-Adan Jeronimo - ajjeroni@csu.fullerton.edu
-Ryan Franson - 
-Aaron Davila -
-Gary Samuel - 
+Adan Jeronimo - ajjeroni@csu.fullerton.edu\
+Ryan Franson - \
+Aaron Davila - \
+Gary Samuel -  
 
 ## Overview
 This project implements a **multi-threaded server-client system** using a **parallel hash table**. The goal is to explore concepts such as threading, mutexes, synchronization, and message passing in a real-world database access scenario. 
