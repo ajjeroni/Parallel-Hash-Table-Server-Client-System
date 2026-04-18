@@ -230,10 +230,10 @@ record getHashTableRecord(const int& id)
 	/**
  	 * TODO: grab mutex of the cell
  	 */
+	hashTableCellPtr->lockCell();
 	
 	/* Get the iterator to the list of records hashing to this location */
 	list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
-	
 	do
 	{
 		/* Save the record */
@@ -248,13 +248,25 @@ record getHashTableRecord(const int& id)
 	}
 	/* Go through all the records */
 	while((recIt != hashTableCellPtr->recordList.end()) && (rec.id != id));
-	
-	
+
+	// !! Incase the linked-list is empty !!
+	// for (list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
+	// 	 recIt != hashTableCellPtr->recordList.end();
+	// 	 ++recIt)
+	// {
+	// 	if (recIt->id == id)
+	// 	{
+	// 		rec = *recIt;
+	// 		break;
+	// 	}
+	// }
 	
 	/**
  	 * TODO: release mutex of the cell. Hint: call unlockCell() to release
      *       mutex protecting the cell.
  	 */
+	hashTableCellPtr->unlockCell();
+
 	
 	return rec;
 }
