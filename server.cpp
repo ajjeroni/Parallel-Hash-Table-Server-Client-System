@@ -91,7 +91,6 @@ pthread_mutex_t idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Used to implement the fetcher thread pool */
 pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t threadPoolMutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Set by SIGINT so the server can shut down cleanly */
 volatile sig_atomic_t shutdownRequested = 0;
@@ -119,6 +118,20 @@ void cleanUp(int sig)
 {
 	(void)sig;
 	shutdownRequested = 1;
+}
+
+void installSignalHandler()
+{
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = cleanUp;
+	sigemptyset(&sa.sa_mask);
+
+	if(sigaction(SIGINT, &sa, NULL) < 0)
+	{
+		perror("sigaction");
+		exit(-1);
+	}
 }
 
 /**
@@ -217,6 +230,7 @@ int populateHashTable(const string& fileName)
 
 /**
  * Gets ids to process from work list
+ * Caller must already hold idsToLookUpListMutex.
  * @return - the request to process, or
  * {-1, -1} if there is no work
  */
@@ -226,27 +240,23 @@ message getIdsToLookUp()
 	msg.id = -1;
 	msg.replyQueueId = -1;
 
-	pthread_mutex_lock(&idsToLookUpListMutex);
-
 	if(!idsToLookUpList.empty())
 	{
 		msg = idsToLookUpList.front();
 		idsToLookUpList.pop_front();
 	}
 
-	pthread_mutex_unlock(&idsToLookUpListMutex);
 	return msg;
 }
 
 /**
+ * Caller must already hold idsToLookUpListMutex.
  * Add a record lookup request to the work list.
- * @param request - the request to process
+ * @param msg - the request to process
  */
 void addIdsToLookUp(const message& msg)
 {
-	pthread_mutex_lock(&idsToLookUpListMutex);
 	idsToLookUpList.push_back(msg);
-	pthread_mutex_unlock(&idsToLookUpListMutex);
 }
 
 /**
@@ -259,16 +269,22 @@ void* threadPoolFunc(void* arg)
 
 	while(true)
 	{
-		pthread_mutex_lock(&threadPoolMutex);
-		message msg = getIdsToLookUp();
+		pthread_mutex_lock(&idsToLookUpListMutex);
+		message msg = {};
+		msg.id = -1;
+		msg.replyQueueId = -1;
 
-		while((msg.id == -1) && !shutdownRequested)
+		while(idsToLookUpList.empty() && !shutdownRequested)
 		{
-			pthread_cond_wait(&threadPoolCondVar, &threadPoolMutex);
+			pthread_cond_wait(&threadPoolCondVar, &idsToLookUpListMutex);
+		}
+
+		if(!idsToLookUpList.empty())
+		{
 			msg = getIdsToLookUp();
 		}
 
-		pthread_mutex_unlock(&threadPoolMutex);
+		pthread_mutex_unlock(&idsToLookUpListMutex);
 
 		if((msg.id == -1) && shutdownRequested)
 		{
@@ -287,9 +303,7 @@ void* threadPoolFunc(void* arg)
  */
 void wakeUpThread()
 {
-	pthread_mutex_lock(&threadPoolMutex);
 	pthread_cond_signal(&threadPoolCondVar);
-	pthread_mutex_unlock(&threadPoolMutex);
 }
 
 /**
@@ -351,8 +365,10 @@ void processIncomingMessages()
 			break;
 		}
 
+		pthread_mutex_lock(&idsToLookUpListMutex);
 		addIdsToLookUp(msg);
 		wakeUpThread();
+		pthread_mutex_unlock(&idsToLookUpListMutex);
 	}
 }
 
@@ -397,9 +413,9 @@ void shutdownServer()
 {
 	shutdownRequested = 1;
 
-	pthread_mutex_lock(&threadPoolMutex);
+	pthread_mutex_lock(&idsToLookUpListMutex);
 	pthread_cond_broadcast(&threadPoolCondVar);
-	pthread_mutex_unlock(&threadPoolMutex);
+	pthread_mutex_unlock(&idsToLookUpListMutex);
 
 	if(msqid >= 0)
 	{
@@ -421,7 +437,6 @@ void shutdownServer()
 	}
 
 	pthread_mutex_destroy(&idsToLookUpListMutex);
-	pthread_mutex_destroy(&threadPoolMutex);
 	pthread_cond_destroy(&threadPoolCondVar);
 }
 
@@ -433,7 +448,7 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 
-	signal(SIGINT, cleanUp);
+	installSignalHandler();
 	populateHashTable(argv[1]);
 
 	numThreads = atoi(argv[2]);
