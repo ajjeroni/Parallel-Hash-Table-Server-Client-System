@@ -61,6 +61,10 @@ public:
     pthread_mutex_t cellMutex;   
 };
 
+/* global variable for worker threads */
+// better design if pthread_join()
+vector<pthread_t> workerThreads;
+
 /* The number of cells in the hash table */
 #define NUMBER_OF_HASH_CELLS 100
 
@@ -385,7 +389,16 @@ void wakeUpThread()
 void createThreads(const int& numThreads)
 {
 	/** TODO: create numThreads threads that call threadPoolFunc() */
-	
+	workerThreads.resize(numThreads);
+
+	for (int i = 0; i < numThreads; ++i)
+	{
+		if (pthread_create(&workerThreads[i], NULL, threadPoolFunc, NULL) != 0)
+		{
+			perror("pthread_create");
+			exit(-1);
+		}
+	}
 }
 
 /**
