@@ -37,13 +37,16 @@ class hashTableCell
 {
 	/* Public members */
 	public:	
-
+	
 	/**
  	 * Initialize the mutex
  	 */
+	pthread_mutex_t cellMutex;
+
 	hashTableCell()
 	{
 		/* Initialize the mutex using pthread_mutex_init() */
+		pthread_mutex_init(&cellMutex, NULL);
 	}
 	
 	/**
@@ -52,6 +55,7 @@ class hashTableCell
 	~hashTableCell()
 	{
 		/* Deallocate the mutex using pthread_mutex_destroy() */
+		pthread_mutex_destroy(&cellMutex);
 	}
 	
 	/**
@@ -60,6 +64,7 @@ class hashTableCell
 	void lockCell()
 	{
 		/*TODO: Add code for locking the cell mutex */
+		pthread_mutex_lock(&cellMutex);
 	}
 	
 	/**
@@ -68,6 +73,7 @@ class hashTableCell
 	void unlockCell()
 	{
 		/* TODO: Add code for unlocking the cell mutex */
+		pthread_mutex_unlock(&cellMutex);
 	}
 
 		
@@ -187,16 +193,20 @@ void printHashTable()
  */
 void addToHashTable(const record& rec)
 {
+	// cleaner way to grab index
+	int index = rec.id % NUMBER_OF_HASH_CELLS;
 	/**
  	 * TODO: grab mutex of the hash table cell
  	 */
+	hashTable.at(index).lockCell();
 	
 	/* Hash, and save the record */
-	hashTable.at(rec.id % NUMBER_OF_HASH_CELLS).recordList.push_back(rec);
+	hashTable.at(index).recordList.push_back(rec);
 	
 	/**
  	 * TODO: release mutex of the hashtable cell
  	 */
+	hashTable.at(index).unlockCell();
 	
 }
 
