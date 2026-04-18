@@ -1,35 +1,34 @@
-# Parallel Hash Table Server-Client System
+Parallel Hash Table Server Client System
 
-## Team
-- Adan Jeronimo - ajjeroni@csu.fullerton.edu
-- Ryan Franson
-- Aaron Davila
-- Gary Samuel
+Names:
+Adan Jeronimo - ajjeroni@csu.fullerton.edu
+Ryan Franson
+Aaron Davila
+Gary Samuel
 
-## Language
+Language:
 C++
 
-## How To Build
-Run this project on Linux.
+How to compile:
+Use Linux and run:
 
 ```sh
 make
 ```
 
-## How To Run
-Start the server first and then run one or more clients in separate terminals.
+How to run:
 
 ```sh
 ./server namesDB.txt 10
 ./client
 ```
 
-## Extra Credit
-Implemented.
+Extra credit:
+Yes. The fetcher threads use a condition variable so they sleep until there is work.
+I also made it so more than one client can run at the same time by giving each client its own
+reply queue.
 
-The server now uses a condition-variable-based thread pool, and each client creates a private
-reply queue so multiple clients can run at the same time without reading each other's results.
-
-## Notes
-- Press `Ctrl-C` in the server terminal to stop the server and remove the shared request queue.
-- Press `Ctrl-C` in a client terminal to remove that client's private reply queue.
+Notes:
+- Run the server first.
+- Press Ctrl-C on the server to remove the main queue.
+- Press Ctrl-C on a client to remove that client's private queue.

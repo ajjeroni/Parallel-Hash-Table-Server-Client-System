@@ -1,6 +1,5 @@
 /** This program illustrates the server end of the message queue **/
 #include <errno.h>
-#include <stdint.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -31,12 +30,6 @@ struct record
 
 	/* The last name */
 	string lastName;
-};
-
-struct lookupRequest
-{
-	int id;
-	int replyQueueId;
 };
 
 /**
@@ -91,7 +84,7 @@ int numThreads = 0;
 int msqid = -1;
 
 /* The ids that have yet to be looked up */
-list<lookupRequest> idsToLookUpList;
+list<message> idsToLookUpList;
 
 /* Protects idsToLookUpList */
 pthread_mutex_t idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -126,23 +119,6 @@ void cleanUp(int sig)
 {
 	(void)sig;
 	shutdownRequested = 1;
-}
-
-/**
- * Installs the SIGINT handler used for cleanup.
- */
-void installSignalHandler()
-{
-	struct sigaction action;
-	memset(&action, 0, sizeof(action));
-	action.sa_handler = cleanUp;
-	sigemptyset(&action.sa_mask);
-
-	if(sigaction(SIGINT, &action, NULL) < 0)
-	{
-		perror("sigaction");
-		exit(-1);
-	}
 }
 
 /**
@@ -244,30 +220,32 @@ int populateHashTable(const string& fileName)
  * @return - the request to process, or
  * {-1, -1} if there is no work
  */
-lookupRequest getIdsToLookUp()
+message getIdsToLookUp()
 {
-	lookupRequest request = {-1, -1};
+	message msg = {};
+	msg.id = -1;
+	msg.replyQueueId = -1;
 
 	pthread_mutex_lock(&idsToLookUpListMutex);
 
 	if(!idsToLookUpList.empty())
 	{
-		request = idsToLookUpList.front();
+		msg = idsToLookUpList.front();
 		idsToLookUpList.pop_front();
 	}
 
 	pthread_mutex_unlock(&idsToLookUpListMutex);
-	return request;
+	return msg;
 }
 
 /**
  * Add a record lookup request to the work list.
  * @param request - the request to process
  */
-void addIdsToLookUp(const lookupRequest& request)
+void addIdsToLookUp(const message& msg)
 {
 	pthread_mutex_lock(&idsToLookUpListMutex);
-	idsToLookUpList.push_back(request);
+	idsToLookUpList.push_back(msg);
 	pthread_mutex_unlock(&idsToLookUpListMutex);
 }
 
@@ -282,23 +260,23 @@ void* threadPoolFunc(void* arg)
 	while(true)
 	{
 		pthread_mutex_lock(&threadPoolMutex);
-		lookupRequest request = getIdsToLookUp();
+		message msg = getIdsToLookUp();
 
-		while((request.id == -1) && !shutdownRequested)
+		while((msg.id == -1) && !shutdownRequested)
 		{
 			pthread_cond_wait(&threadPoolCondVar, &threadPoolMutex);
-			request = getIdsToLookUp();
+			msg = getIdsToLookUp();
 		}
 
 		pthread_mutex_unlock(&threadPoolMutex);
 
-		if((request.id == -1) && shutdownRequested)
+		if((msg.id == -1) && shutdownRequested)
 		{
 			break;
 		}
 
-		record rec = getHashTableRecord(request.id);
-		sendRecord(request.replyQueueId, rec);
+		record rec = getHashTableRecord(msg.id);
+		sendRecord(msg.replyQueueId, rec);
 	}
 
 	return NULL;
@@ -373,8 +351,7 @@ void processIncomingMessages()
 			break;
 		}
 
-		lookupRequest request = {msg.id, msg.replyQueueId};
-		addIdsToLookUp(request);
+		addIdsToLookUp(msg);
 		wakeUpThread();
 	}
 }
@@ -401,9 +378,7 @@ void* addNewRecords(void* arg)
 {
 	(void)arg;
 
-	unsigned int seed =
-		static_cast<unsigned int>(time(NULL)) ^
-		static_cast<unsigned int>(reinterpret_cast<uintptr_t>(&seed));
+	unsigned int seed = (unsigned int)time(NULL) + (unsigned int)pthread_self();
 
 	while(!shutdownRequested)
 	{
@@ -413,18 +388,6 @@ void* addNewRecords(void* arg)
 	}
 
 	return NULL;
-}
-
-/**
- * Joins every thread in the provided vector.
- * @param threads - thread ids to join
- */
-void joinThreads(vector<pthread_t>& threads)
-{
-	for(vector<pthread_t>::iterator it = threads.begin(); it != threads.end(); ++it)
-	{
-		pthread_join(*it, NULL);
-	}
 }
 
 /**
@@ -447,8 +410,15 @@ void shutdownServer()
 		msqid = -1;
 	}
 
-	joinThreads(workerThreads);
-	joinThreads(inserterThreads);
+	for(int i = 0; i < (int)workerThreads.size(); ++i)
+	{
+		pthread_join(workerThreads[i], NULL);
+	}
+
+	for(int i = 0; i < (int)inserterThreads.size(); ++i)
+	{
+		pthread_join(inserterThreads[i], NULL);
+	}
 
 	pthread_mutex_destroy(&idsToLookUpListMutex);
 	pthread_mutex_destroy(&threadPoolMutex);
@@ -463,7 +433,7 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 
-	installSignalHandler();
+	signal(SIGINT, cleanUp);
 	populateHashTable(argv[1]);
 
 	numThreads = atoi(argv[2]);

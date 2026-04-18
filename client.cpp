@@ -10,7 +10,7 @@
 
 #include "msg.h"
 
-/* Queue used for responses destined to this client */
+/* this client gets its own reply queue */
 int clientReplyQueueId = -1;
 
 /**
@@ -56,7 +56,7 @@ int main()
 		exit(-1);
 	}
 
-	srand(static_cast<unsigned int>(time(NULL)) ^ static_cast<unsigned int>(getpid()));
+	srand((unsigned int)time(NULL) + (unsigned int)getpid());
 
 	while(true)
 	{
