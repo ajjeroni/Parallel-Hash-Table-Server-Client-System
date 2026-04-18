@@ -13,6 +13,7 @@ void* threadFunc(void* args)
 	
 	/* Print the thread id */
 	fprintf(stderr, "Hi, I am thread %u\n", (unsigned int)pthread_self());
+	return NULL;
 }
 
 int main(int argc, char** argv)

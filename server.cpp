@@ -55,7 +55,7 @@ public:
     {
         pthread_mutex_unlock(&cellMutex);
     }
-
+	
     list<record> recordList;
 
     pthread_mutex_t cellMutex;   
@@ -64,6 +64,9 @@ public:
 /* global variable for worker threads */
 // better design if pthread_join()
 vector<pthread_t> workerThreads;
+
+/* global variable for inserter threads */
+vector<pthread_t> inserterThreads;
 
 /* The number of cells in the hash table */
 #define NUMBER_OF_HASH_CELLS 100
@@ -86,7 +89,7 @@ list<int> idsToLookUpList;
 /**
  * TODO: Declare and initialize a mutex for protecting the idsToLookUpList.
  */
-pthread_mutex_init idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
@@ -279,6 +282,8 @@ int populateHashTable(const string& fileName)
 	
 	/* Close the file */
 	dbFile.close();
+
+	return 0;
 }
 
 /**
@@ -327,45 +332,63 @@ void addIdsToLookUp(const int& id)
  * The thread pool function
  * @param thread argument
  */
-void* threadPoolFunc(void* arg)
-{
-	/* The id to process */
-	int id = -1; 
+// void* threadPoolFunc(void* arg)
+// {
+// 	/* The id to process */
+// 	int id = -1; 
 	
-	/* Sleep until work arrives */
-	while(true)
-	{
+// 	/* Sleep until work arrives */
+// 	while(true)
+// 	{
 
-		/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
+// 		/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
 		
-		/* Get the id to look up */
-		id = getIdsToLookUp();	
+// 		/* Get the id to look up */
+// 		id = getIdsToLookUp();	
 			
-		/* No work to do */
-		while(id == -1)
-		{
+// 		/* No work to do */
+// 		while(id == -1)
+// 		{
 				
 			
-			/* TODO: Sleep on the condition variable threadPoolCondVar */
+// 			/* TODO: Sleep on the condition variable threadPoolCondVar */
 			
-			/* Get the id to look up */
-			id = getIdsToLookUp();	
+// 			/* Get the id to look up */
+// 			id = getIdsToLookUp();	
 			
-		}
+// 		}
 		
 		
-		/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
+// 		/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
 		
 			
-		/* Look up id */
-		record rec = getHashTableRecord(id);
+// 		/* Look up id */
+// 		record rec = getHashTableRecord(id);
 		
 		
-		/* Send the record to the client */
-		sendRecord(msqid, rec);
+// 		/* Send the record to the client */
+// 		sendRecord(msqid, rec);
 		
-	}
+// 	}
 	
+// }
+void* threadPoolFunc(void* arg)
+{
+	while (true)
+	{
+		int id = getIdsToLookUp();
+
+		if (id == -1)
+		{
+			usleep(1000);
+			continue;
+		}
+
+		record rec = getHashTableRecord(id);
+		sendRecord(msqid, rec);
+	}
+
+	return NULL;
 }
 
 /**
@@ -407,10 +430,16 @@ void createThreads(const int& numThreads)
  */
 void createInserterThreads()
 {
+	inserterThreads.resize(NUM_INSERTERS);
 
-	/* TODO: create NUM_INSERTERS threads that add new elements to the hashtable
- 	 * by calling addNewRecords(). 
- 	 */
+	for (int i = 0; i < NUM_INSERTERS; ++i)
+	{
+		if (pthread_create(&inserterThreads[i], NULL, addNewRecords, NULL) != 0)
+		{
+			perror("pthread_create");
+			exit(-1);
+		}
+	}
 }
 
 
@@ -423,7 +452,7 @@ void processIncomingMessages()
 	message msg;
 	
 	/* The id of the record */
-	int id = -1;
+	// int id = -1;
 	
 	/* Wait for messages forever */
 	while(true)
@@ -475,8 +504,11 @@ void* addNewRecords(void* arg)
 		
 		/* Add the record to hashtable */
 		addToHashTable(rec);
+
+		// recommended so inserter threads do not generate records too quickly
+		usleep(5);
 	}
-	
+	return NULL;
 }
 
 int main(int argc, char** argv)
