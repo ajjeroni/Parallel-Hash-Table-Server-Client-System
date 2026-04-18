@@ -18,6 +18,9 @@ struct message
 	
 	/* A number */
 	int id;
+
+	/* Client-specific reply queue id */
+	int replyQueueId;
 	
 	/* The first name */
 	char firstName[MAX_NAME_LEN];	

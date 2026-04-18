@@ -1,34 +1,43 @@
 /** This program illustrates the server end of the message queue **/
+#include <errno.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <stdlib.h>
-#include <sys/types.h>
+#include <string.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
-#include <signal.h>
-#include <vector>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <fstream>
 #include <list>
 #include <string>
-#include <fstream>
+#include <vector>
 
 #include "msg.h"
+
 using namespace std;
 
 struct record
 {
 	/* The record id */
 	int id;
-	
-	/* The first name */	
-	string firstName;
-		
+
 	/* The first name */
-	string lastName;	
+	string firstName;
+
+	/* The last name */
+	string lastName;
 };
 
-
+struct lookupRequest
+{
+	int id;
+	int replyQueueId;
+};
 
 /**
  * The structure of a hashtable cell
@@ -36,33 +45,31 @@ struct record
 class hashTableCell
 {
 public:
-    hashTableCell()
-    {
-        pthread_mutex_init(&cellMutex, NULL);
-    }
+	hashTableCell()
+	{
+		pthread_mutex_init(&cellMutex, NULL);
+	}
 
-    ~hashTableCell()
-    {
-        pthread_mutex_destroy(&cellMutex);
-    }
+	~hashTableCell()
+	{
+		pthread_mutex_destroy(&cellMutex);
+	}
 
-    void lockCell()
-    {
-        pthread_mutex_lock(&cellMutex);
-    }
+	void lockCell()
+	{
+		pthread_mutex_lock(&cellMutex);
+	}
 
-    void unlockCell()
-    {
-        pthread_mutex_unlock(&cellMutex);
-    }
-	
-    list<record> recordList;
+	void unlockCell()
+	{
+		pthread_mutex_unlock(&cellMutex);
+	}
 
-    pthread_mutex_t cellMutex;   
+	list<record> recordList;
+	pthread_mutex_t cellMutex;
 };
 
 /* global variable for worker threads */
-// better design if pthread_join()
 vector<pthread_t> workerThreads;
 
 /* global variable for inserter threads */
@@ -80,34 +87,26 @@ vector<hashTableCell> hashTable(NUMBER_OF_HASH_CELLS);
 /* The number of threads */
 int numThreads = 0;
 
-/* The message queue id */
-int msqid;
+/* The shared request queue id */
+int msqid = -1;
 
-/* The ids that yet to be looked up */
-list<int> idsToLookUpList;
+/* The ids that have yet to be looked up */
+list<lookupRequest> idsToLookUpList;
 
-/**
- * TODO: Declare and initialize a mutex for protecting the idsToLookUpList.
- */
+/* Protects idsToLookUpList */
 pthread_mutex_t idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* Used to implement the fetcher thread pool */
+pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t threadPoolMutex = PTHREAD_MUTEX_INITIALIZER;
 
-/**
- * TODO: declare and initialize the condition variable, threadPoolCondVar, 
- * for implementing a thread pool.
- */
-
-
-/* TODO: Declare the mutex, threadPoolMutex, for protecting the thread pool
- * condition variable. 
- */
-
+/* Set by SIGINT so the server can shut down cleanly */
+volatile sig_atomic_t shutdownRequested = 0;
 
 /**
  * Prototype for createInserterThreads
  */
 void createInserterThreads();
-
 
 /**
  * A prototype for adding new records.
@@ -115,57 +114,60 @@ void createInserterThreads();
 void* addNewRecords(void* arg);
 
 /**
- * Deallocated the message queue
+ * A prototype for fetcher threads.
+ */
+void* threadPoolFunc(void* arg);
+
+/**
+ * Marks the server for shutdown when Ctrl-C is pressed.
  * @param sig - the signal
  */
 void cleanUp(int sig)
 {
+	(void)sig;
+	shutdownRequested = 1;
+}
 
-	/* Add code for deallocating the queue */
+/**
+ * Installs the SIGINT handler used for cleanup.
+ */
+void installSignalHandler()
+{
+	struct sigaction action;
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = cleanUp;
+	sigemptyset(&action.sa_mask);
+
+	if(sigaction(SIGINT, &action, NULL) < 0)
+	{
+		perror("sigaction");
+		exit(-1);
+	}
 }
 
 /**
  * Sends the message over the message queue
- * @param msqid - the message queue id
+ * @param targetQueueId - the destination queue id
  * @param rec - the record to send
  */
-void sendRecord(const int& msqid, const record& rec)
+void sendRecord(const int& targetQueueId, const record& rec)
 {
-	/**
- 	 * Convert the record to message
- 	 */
-		
 	/* The message to send */
-	message msg; 
-	
-	/* Copy fields from the record into the message queue */	
+	message msg = {};
+
+	/* Copy fields from the record into the message queue */
 	msg.messageType = SERVER_TO_CLIENT_MSG;
 	msg.id = rec.id;
-	strncpy(msg.firstName, rec.firstName.c_str(), MAX_NAME_LEN);	
-	strncpy(msg.lastName, rec.lastName.c_str(), MAX_NAME_LEN);
-	
-	/* Send the message */
-	sendMessage(msqid, msg);		
-}
+	msg.replyQueueId = targetQueueId;
+	snprintf(msg.firstName, MAX_NAME_LEN, "%s", rec.firstName.c_str());
+	snprintf(msg.lastName, MAX_NAME_LEN, "%s", rec.lastName.c_str());
 
-/**
- * Prints the hash table
- */
-void printHashTable()
-{
-	/* Go through the hash table */
-	for(vector<hashTableCell>::const_iterator hashIt = hashTable.begin();
-		hashIt != hashTable.end(); ++hashIt)
+	/* Send the message */
+	if(msgsnd(targetQueueId, &msg, sizeof(msg) - sizeof(long), 0) < 0)
 	{
-		/* Go through the list at each hash location */
-		for(list<record>::const_iterator lIt = hashIt->recordList.begin();
-			lIt != hashIt->recordList.end(); ++lIt)
+		if((errno != EIDRM) && (errno != EINVAL))
 		{
-			fprintf(stderr, "%d-%s-%s-%d\n", lIt->id, 
-						lIt->firstName.c_str(), 
-						lIt->lastName.c_str(),
-						lIt->id % NUMBER_OF_HASH_CELLS
-						);
+			perror("msgsnd");
 		}
 	}
 }
@@ -176,71 +178,41 @@ void printHashTable()
  */
 void addToHashTable(const record& rec)
 {
-	// cleaner way to grab index
 	int index = rec.id % NUMBER_OF_HASH_CELLS;
 
 	hashTable.at(index).lockCell();
-	
-	/* Hash, and save the record */
 	hashTable.at(index).recordList.push_back(rec);
-	
 	hashTable.at(index).unlockCell();
-	
 }
 
-
 /**
- * Adds a record to hashtable
+ * Looks up a record in the hashtable.
  * @param id the id of the record to retrieve
  * @return - the record from hashtable if exists;
  * otherwise returns a record with id field set to -1
  */
 record getHashTableRecord(const int& id)
 {
-	/* Get pointer to the hash table record */
-	hashTableCell* hashTableCellPtr = &hashTable.at(id % NUMBER_OF_HASH_CELLS); 
-	
-	/**
- 	 * The record to return
- 	 */
-	 record rec = { -1, "", ""};
-	
+	hashTableCell* hashTableCellPtr = &hashTable.at(id % NUMBER_OF_HASH_CELLS);
+	record rec = {-1, "", ""};
+
 	hashTableCellPtr->lockCell();
-	
-	/* Get the iterator to the list of records hashing to this location */
-	list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
-	do
+
+	for(list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
+		recIt != hashTableCellPtr->recordList.end();
+		++recIt)
 	{
-		/* Save the record */
-		if(recIt->id == id) 
+		if(recIt->id == id)
 		{
 			rec = *recIt;
-			
+			break;
 		}
-		
-		/* Advance the record it */
-		++recIt;
 	}
-	/* Go through all the records */
-	while((recIt != hashTableCellPtr->recordList.end()) && (rec.id != id));
-
-	// !! Incase the linked-list is empty !!
-	// for (list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
-	// 	 recIt != hashTableCellPtr->recordList.end();
-	// 	 ++recIt)
-	// {
-	// 	if (recIt->id == id)
-	// 	{
-	// 		rec = *recIt;
-	// 		break;
-	// 	}
-	// }
 
 	hashTableCellPtr->unlockCell();
 
 	return rec;
 }
-
 
 /**
  * Loads the database into the hashtable
@@ -248,144 +220,85 @@ record getHashTableRecord(const int& id)
  * @return - the number of records left.
  */
 int populateHashTable(const string& fileName)
-{	
-	/* The record */
+{
 	record rec;
-	
-	/* Open the file */
 	ifstream dbFile(fileName.c_str());
-	
-	/* Is the file open */
+
 	if(!dbFile.is_open())
 	{
 		fprintf(stderr, "Could not open file %s\n", fileName.c_str());
 		exit(-1);
 	}
-	
-	
-	/* Read the entire file */
-	while(!dbFile.eof())
-	{
-		/* Read the id */
-		dbFile >> rec.id;
-		
-		/* Make sure we did not hit the EOF */
-		if(!dbFile.eof())
-		{
-			/* Read the first name and last name */
-			dbFile >> rec.firstName >> rec.lastName;
-						
-			/* Add to hash table */
-			addToHashTable(rec);	
-		}
-	}
-	
-	/* Close the file */
-	dbFile.close();
 
+	while(dbFile >> rec.id >> rec.firstName >> rec.lastName)
+	{
+		addToHashTable(rec);
+	}
+
+	dbFile.close();
 	return 0;
 }
 
 /**
  * Gets ids to process from work list
- * @return - the id of record to look up, or
- * -1 if there is no work
+ * @return - the request to process, or
+ * {-1, -1} if there is no work
  */
-int getIdsToLookUp()
+lookupRequest getIdsToLookUp()
 {
-	/* The id */
-	int id = -1;
-	
-	/* TODO: Aquire the idsToLookUpListMutex mutex */
+	lookupRequest request = {-1, -1};
+
 	pthread_mutex_lock(&idsToLookUpListMutex);
-	
-	/* Remove id from the list if exists */
-	if(!idsToLookUpList.empty()) 
-    { 
-        id = idsToLookUpList.front(); 
-        idsToLookUpList.pop_front(); 
-    }
-	
-	/* TODO: Release idsToLookUpListMutex  */
+
+	if(!idsToLookUpList.empty())
+	{
+		request = idsToLookUpList.front();
+		idsToLookUpList.pop_front();
+	}
+
 	pthread_mutex_unlock(&idsToLookUpListMutex);
-	
-	return id;
+	return request;
 }
 
 /**
- * Add id of record to look up
- * @param id - the id to process
+ * Add a record lookup request to the work list.
+ * @param request - the request to process
  */
-void addIdsToLookUp(const int& id)
+void addIdsToLookUp(const lookupRequest& request)
 {
-	/* TODO: Aquire idsToLookUpListMutex the list mutex */
 	pthread_mutex_lock(&idsToLookUpListMutex);
-		
-	/* Add the element to look up */
-	idsToLookUpList.push_back(id);
-		
-	/* TODO: Release the idsToLookUpList  */
+	idsToLookUpList.push_back(request);
 	pthread_mutex_unlock(&idsToLookUpListMutex);
 }
 
 /**
  * The thread pool function
- * @param thread argument
+ * @param arg - unused
  */
-// void* threadPoolFunc(void* arg)
-// {
-// 	/* The id to process */
-// 	int id = -1; 
-	
-// 	/* Sleep until work arrives */
-// 	while(true)
-// 	{
-
-// 		/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
-		
-// 		/* Get the id to look up */
-// 		id = getIdsToLookUp();	
-			
-// 		/* No work to do */
-// 		while(id == -1)
-// 		{
-				
-			
-// 			/* TODO: Sleep on the condition variable threadPoolCondVar */
-			
-// 			/* Get the id to look up */
-// 			id = getIdsToLookUp();	
-			
-// 		}
-		
-		
-// 		/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
-		
-			
-// 		/* Look up id */
-// 		record rec = getHashTableRecord(id);
-		
-		
-// 		/* Send the record to the client */
-// 		sendRecord(msqid, rec);
-		
-// 	}
-	
-// }
 void* threadPoolFunc(void* arg)
 {
-	while (true)
-	{
-		int id = getIdsToLookUp();
+	(void)arg;
 
-		if (id == -1)
+	while(true)
+	{
+		pthread_mutex_lock(&threadPoolMutex);
+		lookupRequest request = getIdsToLookUp();
+
+		while((request.id == -1) && !shutdownRequested)
 		{
-			usleep(1000);
-			continue;
+			pthread_cond_wait(&threadPoolCondVar, &threadPoolMutex);
+			request = getIdsToLookUp();
 		}
 
-		record rec = getHashTableRecord(id);
-		sendRecord(msqid, rec);
+		pthread_mutex_unlock(&threadPoolMutex);
+
+		if((request.id == -1) && shutdownRequested)
+		{
+			break;
+		}
+
+		record rec = getHashTableRecord(request.id);
+		sendRecord(request.replyQueueId, rec);
 	}
 
 	return NULL;
@@ -396,13 +309,9 @@ void* threadPoolFunc(void* arg)
  */
 void wakeUpThread()
 {
-	
-
-	/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
-
-	/* TODO: Wake up a thread sleeping on threadPoolCondVar */
-	
-	/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
+	pthread_mutex_lock(&threadPoolMutex);
+	pthread_cond_signal(&threadPoolCondVar);
+	pthread_mutex_unlock(&threadPoolMutex);
 }
 
 /**
@@ -411,12 +320,11 @@ void wakeUpThread()
  */
 void createThreads(const int& numThreads)
 {
-	/** TODO: create numThreads threads that call threadPoolFunc() */
 	workerThreads.resize(numThreads);
 
-	for (int i = 0; i < numThreads; ++i)
+	for(int i = 0; i < numThreads; ++i)
 	{
-		if (pthread_create(&workerThreads[i], NULL, threadPoolFunc, NULL) != 0)
+		if(pthread_create(&workerThreads[i], NULL, threadPoolFunc, NULL) != 0)
 		{
 			perror("pthread_create");
 			exit(-1);
@@ -432,9 +340,9 @@ void createInserterThreads()
 {
 	inserterThreads.resize(NUM_INSERTERS);
 
-	for (int i = 0; i < NUM_INSERTERS; ++i)
+	for(int i = 0; i < NUM_INSERTERS; ++i)
 	{
-		if (pthread_create(&inserterThreads[i], NULL, addNewRecords, NULL) != 0)
+		if(pthread_create(&inserterThreads[i], NULL, addNewRecords, NULL) != 0)
 		{
 			perror("pthread_create");
 			exit(-1);
@@ -442,48 +350,46 @@ void createInserterThreads()
 	}
 }
 
-
 /**
  * Called by parent thread to process incoming messages
  */
 void processIncomingMessages()
 {
-	/* The arriving message */
 	message msg;
-	
-	/* The id of the record */
-	// int id = -1;
-	
-	/* Wait for messages forever */
-	while(true)
-	{
 
-		/* Receive the message */
-		recvMessage(msqid, msg, CLIENT_TO_SERVER_MSG);
-		
-		/* TODO: Add id to the list of ids that should be processed */
-		addIdsToLookUp(msg.id);
-			
-		/* TODO: Wake up a thread to process the newly received id */
+	while(!shutdownRequested)
+	{
+		memset(&msg, 0, sizeof(msg));
+
+		if(msgrcv(msqid, &msg, sizeof(msg) - sizeof(long), CLIENT_TO_SERVER_MSG, 0) < 0)
+		{
+			if((errno == EINTR) && shutdownRequested)
+			{
+				break;
+			}
+
+			perror("msgrcv");
+			shutdownRequested = 1;
+			break;
+		}
+
+		lookupRequest request = {msg.id, msg.replyQueueId};
+		addIdsToLookUp(request);
+		wakeUpThread();
 	}
 }
 
 /**
  * Generates a random record
+ * @param seed - thread-local random seed
  * @return - a random record
  */
-record generateRandomRecord()
+record generateRandomRecord(unsigned int& seed)
 {
-	/* A record */
 	record rec;
-		
-	/* Generate a random id */
-	rec.id = rand() % NUMBER_OF_HASH_CELLS;	
-	
-	/* Add the fake first name and last name */
+	rec.id = rand_r(&seed) % NUMBER_OF_HASH_CELLS;
 	rec.firstName = "Random";
 	rec.lastName = "Record";
-	
 	return rec;
 }
 
@@ -492,77 +398,93 @@ record generateRandomRecord()
  * @param arg - some argument (unused)
  */
 void* addNewRecords(void* arg)
-{	
-	/* A randomly generated record */
-	record rec;
-		
-	/* Keep generating random records */	
-	while(true)
-	{
-		/* Generate a record */
-		rec = generateRandomRecord();
-		
-		/* Add the record to hashtable */
-		addToHashTable(rec);
+{
+	(void)arg;
 
-		// recommended so inserter threads do not generate records too quickly
+	unsigned int seed =
+		static_cast<unsigned int>(time(NULL)) ^
+		static_cast<unsigned int>(reinterpret_cast<uintptr_t>(&seed));
+
+	while(!shutdownRequested)
+	{
+		record rec = generateRandomRecord(seed);
+		addToHashTable(rec);
 		usleep(5);
 	}
+
 	return NULL;
+}
+
+/**
+ * Joins every thread in the provided vector.
+ * @param threads - thread ids to join
+ */
+void joinThreads(vector<pthread_t>& threads)
+{
+	for(vector<pthread_t>::iterator it = threads.begin(); it != threads.end(); ++it)
+	{
+		pthread_join(*it, NULL);
+	}
+}
+
+/**
+ * Releases server resources and waits for threads to finish.
+ */
+void shutdownServer()
+{
+	shutdownRequested = 1;
+
+	pthread_mutex_lock(&threadPoolMutex);
+	pthread_cond_broadcast(&threadPoolCondVar);
+	pthread_mutex_unlock(&threadPoolMutex);
+
+	if(msqid >= 0)
+	{
+		if((msgctl(msqid, IPC_RMID, NULL) < 0) && (errno != EIDRM) && (errno != EINVAL))
+		{
+			perror("msgctl");
+		}
+		msqid = -1;
+	}
+
+	joinThreads(workerThreads);
+	joinThreads(inserterThreads);
+
+	pthread_mutex_destroy(&idsToLookUpListMutex);
+	pthread_mutex_destroy(&threadPoolMutex);
+	pthread_cond_destroy(&threadPoolCondVar);
 }
 
 int main(int argc, char** argv)
 {
-	/**
- 	 * Check the command line
- 	 */
 	if(argc < 3)
 	{
 		fprintf(stderr, "USAGE: %s <DATABASE FILE NAME> <NUMBER OF THREADS>\n", argv[0]);
 		exit(-1);
 	}
-	
-	/* TODO: install a signal handler for deallocating the message queue */	
-	
-	/* Populate the hash table */
+
+	installSignalHandler();
 	populateHashTable(argv[1]);
-	
-	
-	printHashTable();
-	
-	/* Get the number of lookup ID threads */
+
 	numThreads = atoi(argv[2]);
-	
-	/* Use a random file and a random character to generate
-	 * a unique key. Same parameters to this function will 
-	 * always generate the same value. This is how multiple
-	 * processes can connect to the same queue.
-	 */
+	if(numThreads <= 0)
+	{
+		fprintf(stderr, "The number of threads must be positive.\n");
+		exit(-1);
+	}
+
 	key_t key = ftok("/bin/ls", 'O');
-	
-	/* Error checks */
 	if(key < 0)
 	{
 		perror("ftok");
 		exit(-1);
 	}
-		
-	/* Connect to the message queue */
-	msqid = createMessageQueue(key);	
-	
-	/* Instantiate a message buffer for sending/receiving msgs 
-       from msg queue */
-	message msg;
-	
-	/* Create the lookup ID threads */
-	createThreads(numThreads);				
-	
-	/* Create the inserter threads */
+
+	msqid = createMessageQueue(key);
+	createThreads(numThreads);
 	createInserterThreads();
-		
-	/* Process incoming requests */
 	processIncomingMessages();
-	
-	
+	shutdownServer();
+
 	return 0;
 }

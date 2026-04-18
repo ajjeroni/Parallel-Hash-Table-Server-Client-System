@@ -1,56 +1,35 @@
 # Parallel Hash Table Server-Client System
 
-Adan Jeronimo - ajjeroni@csu.fullerton.edu\
-Ryan Franson - \
-Aaron Davila - \
-Gary Samuel -  
+## Team
+- Adan Jeronimo - ajjeroni@csu.fullerton.edu
+- Ryan Franson
+- Aaron Davila
+- Gary Samuel
 
-## Overview
-This project implements a **multi-threaded server-client system** using a **parallel hash table**. The goal is to explore concepts such as threading, mutexes, synchronization, and message passing in a real-world database access scenario. 
+## Language
+C++
 
-The server handles multiple client requests concurrently while ensuring safe access to shared data structures.
+## How To Build
+Run this project on Linux.
 
----
+```sh
+make
+```
 
-## Features
-- Multi-threaded server using pthreads
-- Parallel hash table with fine-grained locking (mutex per cell)
-- Client-server communication using System V message queues
-- Concurrent record insertion and retrieval
-- Protection against race conditions and deadlocks
+## How To Run
+Start the server first and then run one or more clients in separate terminals.
 
----
+```sh
+./server namesDB.txt 10
+./client
+```
 
-## Technologies Used
-- **Language:** C++
-- **Libraries:**
-  - pthread (for threading)
-  - STL (vector, list)
-  - System V message queues
+## Extra Credit
+Implemented.
 
----
+The server now uses a condition-variable-based thread pool, and each client creates a private
+reply queue so multiple clients can run at the same time without reading each other's results.
 
-## How It Works
-
-### Server
-- Loads records from a file into a hash table
-- Creates:
-  - Fetcher threads (handle client requests)
-  - Inserter threads (simulate database updates)
-- Uses mutexes to protect individual hash table cells
-- Communicates with clients via message queues
-
-### Client
-- Sends random record ID requests to the server
-- Waits for responses
-- Prints retrieved records
-
----
-
-## Hash Table Design
-- Fixed size: 100 cells
-- Each cell contains:
-  - A linked list of records
-  - A mutex lock
-- Hash function:
-  - index = record_id % 100
+## Notes
+- Press `Ctrl-C` in the server terminal to stop the server and remove the shared request queue.
+- Press `Ctrl-C` in a client terminal to remove that client's private reply queue.
