@@ -35,57 +35,30 @@ struct record
  */
 class hashTableCell
 {
-	/* Public members */
-	public:	
-	
-	/**
- 	 * Initialize the mutex
- 	 */
-	pthread_mutex_t cellMutex;
+public:
+    hashTableCell()
+    {
+        pthread_mutex_init(&cellMutex, NULL);
+    }
 
-	hashTableCell()
-	{
-		/* Initialize the mutex using pthread_mutex_init() */
-		pthread_mutex_init(&cellMutex, NULL);
-	}
-	
-	/**
- 	 * Initialize the mutex
- 	 */
-	~hashTableCell()
-	{
-		/* Deallocate the mutex using pthread_mutex_destroy() */
-		pthread_mutex_destroy(&cellMutex);
-	}
-	
-	/**
- 	 * Locks the cell mutex
- 	 */
-	void lockCell()
-	{
-		/*TODO: Add code for locking the cell mutex */
-		pthread_mutex_lock(&cellMutex);
-	}
-	
-	/**
- 	 * Unlocks the cell mutex
- 	 */
-	void unlockCell()
-	{
-		/* TODO: Add code for unlocking the cell mutex */
-		pthread_mutex_unlock(&cellMutex);
-	}
+    ~hashTableCell()
+    {
+        pthread_mutex_destroy(&cellMutex);
+    }
 
-		
-	
-	/* The linked list of records */
-	list<record> recordList;
-	
-	
-	/**
- 	 * TODO: declare a cell mutex
- 	 */
-	
+    void lockCell()
+    {
+        pthread_mutex_lock(&cellMutex);
+    }
+
+    void unlockCell()
+    {
+        pthread_mutex_unlock(&cellMutex);
+    }
+
+    list<record> recordList;
+
+    pthread_mutex_t cellMutex;   
 };
 
 /* The number of cells in the hash table */
@@ -109,11 +82,14 @@ list<int> idsToLookUpList;
 /**
  * TODO: Declare and initialize a mutex for protecting the idsToLookUpList.
  */
+pthread_mutex_init idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 /**
  * TODO: declare and initialize the condition variable, threadPoolCondVar, 
  * for implementing a thread pool.
  */
+
 
 /* TODO: Declare the mutex, threadPoolMutex, for protecting the thread pool
  * condition variable. 
@@ -195,17 +171,12 @@ void addToHashTable(const record& rec)
 {
 	// cleaner way to grab index
 	int index = rec.id % NUMBER_OF_HASH_CELLS;
-	/**
- 	 * TODO: grab mutex of the hash table cell
- 	 */
+
 	hashTable.at(index).lockCell();
 	
 	/* Hash, and save the record */
 	hashTable.at(index).recordList.push_back(rec);
 	
-	/**
- 	 * TODO: release mutex of the hashtable cell
- 	 */
 	hashTable.at(index).unlockCell();
 	
 }
@@ -227,9 +198,6 @@ record getHashTableRecord(const int& id)
  	 */
 	 record rec = { -1, "", ""};
 	
-	/**
- 	 * TODO: grab mutex of the cell
- 	 */
 	hashTableCellPtr->lockCell();
 	
 	/* Get the iterator to the list of records hashing to this location */
@@ -260,14 +228,9 @@ record getHashTableRecord(const int& id)
 	// 		break;
 	// 	}
 	// }
-	
-	/**
- 	 * TODO: release mutex of the cell. Hint: call unlockCell() to release
-     *       mutex protecting the cell.
- 	 */
+
 	hashTableCellPtr->unlockCell();
 
-	
 	return rec;
 }
 
@@ -325,6 +288,7 @@ int getIdsToLookUp()
 	int id = -1;
 	
 	/* TODO: Aquire the idsToLookUpListMutex mutex */
+	pthread_mutex_lock(&idsToLookUpListMutex);
 	
 	/* Remove id from the list if exists */
 	if(!idsToLookUpList.empty()) 
@@ -334,6 +298,7 @@ int getIdsToLookUp()
     }
 	
 	/* TODO: Release idsToLookUpListMutex  */
+	pthread_mutex_unlock(&idsToLookUpListMutex);
 	
 	return id;
 }
@@ -345,12 +310,13 @@ int getIdsToLookUp()
 void addIdsToLookUp(const int& id)
 {
 	/* TODO: Aquire idsToLookUpListMutex the list mutex */
-	
+	pthread_mutex_lock(&idsToLookUpListMutex);
 		
 	/* Add the element to look up */
 	idsToLookUpList.push_back(id);
 		
 	/* TODO: Release the idsToLookUpList  */
+	pthread_mutex_unlock(&idsToLookUpListMutex);
 }
 
 /**
