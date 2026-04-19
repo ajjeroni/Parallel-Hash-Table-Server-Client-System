@@ -120,8 +120,9 @@ void* addNewRecords(void* arg);
  */
 void cleanUp(int sig)
 {
-
-	/* Add code for deallocating the queue */
+	msgctl(msqid, IPC_RMID, NULL);
+	
+	_exit(0);
 }
 
 /**
@@ -197,48 +198,24 @@ void addToHashTable(const record& rec)
  */
 record getHashTableRecord(const int& id)
 {
-	/* Get pointer to the hash table record */
-	hashTableCell* hashTableCellPtr = &hashTable.at(id % NUMBER_OF_HASH_CELLS); 
-	
-	/**
- 	 * The record to return
- 	 */
-	 record rec = { -1, "", ""};
-	
-	hashTableCellPtr->lockCell();
-	
-	/* Get the iterator to the list of records hashing to this location */
-	list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
-	do
-	{
-		/* Save the record */
-		if(recIt->id == id) 
-		{
-			rec = *recIt;
-			
-		}
-		
-		/* Advance the record it */
-		++recIt;
-	}
-	/* Go through all the records */
-	while((recIt != hashTableCellPtr->recordList.end()) && (rec.id != id));
+    hashTableCell* hashTableCellPtr = &hashTable.at(id % NUMBER_OF_HASH_CELLS);
+    record rec = { -1, "", "" };
 
-	// !! Incase the linked-list is empty !!
-	// for (list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
-	// 	 recIt != hashTableCellPtr->recordList.end();
-	// 	 ++recIt)
-	// {
-	// 	if (recIt->id == id)
-	// 	{
-	// 		rec = *recIt;
-	// 		break;
-	// 	}
-	// }
+    hashTableCellPtr->lockCell();
 
-	hashTableCellPtr->unlockCell();
+    for(list<record>::iterator recIt = hashTableCellPtr->recordList.begin();
+        recIt != hashTableCellPtr->recordList.end();
+        ++recIt)
+    {
+        if(recIt->id == id)
+        {
+            rec = *recIt;
+            break;
+        }
+    }
 
-	return rec;
+    hashTableCellPtr->unlockCell();
+    return rec;
 }
 
 
@@ -370,34 +347,13 @@ void* threadPoolFunc(void* arg)
 		sendRecord(msqid, rec);
 		
 	}
-	
-// }
-// void* threadPoolFunc(void* arg)
-// {
-// 	while (true)
-// 	{
-// 		int id = getIdsToLookUp();
-
-// 		if (id == -1)
-// 		{
-// 			usleep(1000);
-// 			continue;
-// 		}
-
-// 		record rec = getHashTableRecord(id);
-// 		sendRecord(msqid, rec);
-// 	}
-
-// 	return NULL;
-// }
+}
 
 /**
  * Wakes up a thread from the thread pool
  */
 void wakeUpThread()
 {
-	
-
 	/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
 	pthread_mutex_lock(&threadPoolMutex);
 	/* TODO: Wake up a thread sleeping on threadPoolCondVar */
@@ -524,7 +480,8 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 	
-	/* TODO: install a signal handler for deallocating the message queue */	
+	/* TODO: install a signal handler for deallocating the message queue */
+	signal(SIGINT, cleanUp);
 	
 	/* Populate the hash table */
 	populateHashTable(argv[1]);
