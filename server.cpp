@@ -87,21 +87,21 @@ int msqid;
 list<int> idsToLookUpList;
 
 /**
- * TODO: Declare and initialize a mutex for protecting the idsToLookUpList.
+ * Declare and initialize a mutex for protecting the idsToLookUpList.
  */
 pthread_mutex_t idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
- * TODO: declare and initialize the condition variable, threadPoolCondVar, 
+ * declare and initialize the condition variable, threadPoolCondVar, 
  * for implementing a thread pool.
  */
+pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER;
 
-
-/* TODO: Declare the mutex, threadPoolMutex, for protecting the thread pool
+/* Declare the mutex, threadPoolMutex, for protecting the thread pool
  * condition variable. 
  */
-
+pthread_mutex_t threadPoolMutex;
 
 /**
  * Prototype for createInserterThreads
@@ -122,6 +122,9 @@ void cleanUp(int sig)
 {
 
 	/* Add code for deallocating the queue */
+	(void)sig;
+	msgctl(msqid, IPC_RMID, NULL);
+	
 }
 
 /**
@@ -296,7 +299,7 @@ int getIdsToLookUp()
 	/* The id */
 	int id = -1;
 	
-	/* TODO: Aquire the idsToLookUpListMutex mutex */
+	/* Aquire the idsToLookUpListMutex mutex */
 	pthread_mutex_lock(&idsToLookUpListMutex);
 	
 	/* Remove id from the list if exists */
@@ -306,7 +309,7 @@ int getIdsToLookUp()
         idsToLookUpList.pop_front(); 
     }
 	
-	/* TODO: Release idsToLookUpListMutex  */
+	/* Release idsToLookUpListMutex  */
 	pthread_mutex_unlock(&idsToLookUpListMutex);
 	
 	return id;
@@ -318,13 +321,13 @@ int getIdsToLookUp()
  */
 void addIdsToLookUp(const int& id)
 {
-	/* TODO: Aquire idsToLookUpListMutex the list mutex */
+	/* Aquire idsToLookUpListMutex the list mutex */
 	pthread_mutex_lock(&idsToLookUpListMutex);
 		
 	/* Add the element to look up */
 	idsToLookUpList.push_back(id);
 		
-	/* TODO: Release the idsToLookUpList  */
+	/* Release the idsToLookUpList  */
 	pthread_mutex_unlock(&idsToLookUpListMutex);
 }
 
@@ -398,11 +401,14 @@ void wakeUpThread()
 {
 	
 
-	/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
+	/* Lock the mutex protecting threadPoolCondVar from race conditions */
+	pthread_mutex_lock(&threadPoolMutex);
 
-	/* TODO: Wake up a thread sleeping on threadPoolCondVar */
+	/* Wake up a thread sleeping on threadPoolCondVar */
+	pthread_cond_signal(&threadPoolCondVar);
 	
-	/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
+	/* Release the mutex protecting threadPoolCondVar from race conditions */
+	pthread_mutex_unlock(&threadPoolMutex);
 }
 
 /**
@@ -411,7 +417,7 @@ void wakeUpThread()
  */
 void createThreads(const int& numThreads)
 {
-	/** TODO: create numThreads threads that call threadPoolFunc() */
+	/** create numThreads threads that call threadPoolFunc() */
 	workerThreads.resize(numThreads);
 
 	for (int i = 0; i < numThreads; ++i)
@@ -452,7 +458,7 @@ void processIncomingMessages()
 	message msg;
 	
 	/* The id of the record */
-	// int id = -1;
+	int id = -1;
 	
 	/* Wait for messages forever */
 	while(true)
@@ -460,11 +466,19 @@ void processIncomingMessages()
 
 		/* Receive the message */
 		recvMessage(msqid, msg, CLIENT_TO_SERVER_MSG);
+
+		/* Locking Mutex */
+
+		pthread_mutex_lock(&threadPoolMutex);
 		
-		/* TODO: Add id to the list of ids that should be processed */
+		/* Add id to the list of ids that should be processed */
 		addIdsToLookUp(msg.id);
 			
-		/* TODO: Wake up a thread to process the newly received id */
+		/* Wake up a thread to process the newly received id */
+		pthread_cond_signal(&threadPoolCondVar);
+
+		/*Unlock Mutex*/
+		pthread_mutex_unlock(&threadPoolMutex);
 	}
 }
 
@@ -522,7 +536,8 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 	
-	/* TODO: install a signal handler for deallocating the message queue */	
+	/* installed a signal handler for deallocating the message queue */	
+	signal(SIGINT, cleanUp);
 	
 	/* Populate the hash table */
 	populateHashTable(argv[1]);
