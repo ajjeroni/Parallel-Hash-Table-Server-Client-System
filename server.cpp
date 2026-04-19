@@ -102,12 +102,7 @@ pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER;
  * condition variable. 
  */
 pthread_mutex_t threadPoolMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER;
 
-/* Declare the mutex, threadPoolMutex, for protecting the thread pool
- * condition variable. 
- */
-pthread_mutex_t threadPoolMutex;
 
 /**
  * Prototype for createInserterThreads
@@ -379,8 +374,8 @@ void* threadPoolFunc(void* arg)
 		sendRecord(msqid, rec);
 		
 	}
-	
-// }
+}
+
 // void* threadPoolFunc(void* arg)
 // {
 // 	while (true)
@@ -406,15 +401,9 @@ void* threadPoolFunc(void* arg)
 void wakeUpThread()
 {
 	
-
-	/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
-	pthread_mutex_lock(&threadPoolMutex);
-	/* TODO: Wake up a thread sleeping on threadPoolCondVar */
-	pthread_cond_signal(&threadPoolCondVar);
-	/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
 	/* Lock the mutex protecting threadPoolCondVar from race conditions */
 	pthread_mutex_lock(&threadPoolMutex);
-
+	
 	/* Wake up a thread sleeping on threadPoolCondVar */
 	pthread_cond_signal(&threadPoolCondVar);
 	
@@ -484,9 +473,7 @@ void processIncomingMessages()
 		
 		/* Add id to the list of ids that should be processed */
 		addIdsToLookUp(msg.id);
-			
-		/* TODO: Wake up a thread to process the newly received id */
-		wakeUpThread();
+
 		/* Wake up a thread to process the newly received id */
 		pthread_cond_signal(&threadPoolCondVar);
 
@@ -569,10 +556,10 @@ int main(int argc, char** argv)
 	key_t key = ftok("/bin/ls", 'O');
 	
 	/* Error checks */
-	if(key < 0)
+	if (key == (key_t)-1)
 	{
 		perror("ftok");
-		exit(-1);
+		exit(EXIT_FAILURE);
 	}
 		
 	/* Connect to the message queue */
