@@ -2,7 +2,7 @@
 
 Adan Jeronimo - ajjeroni@csu.fullerton.edu\
 Ryan Franson - \
-Aaron Davila - \
+Aaron Davila - aaron.davila@csu.fullerton.edu\
 Gary Samuel -  
 
 ## Overview
