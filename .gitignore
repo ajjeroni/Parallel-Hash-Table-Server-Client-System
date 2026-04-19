@@ -1,0 +1,6 @@
+client
+condvar
+msg.o
+pthread
+server
+signal
