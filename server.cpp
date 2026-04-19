@@ -96,6 +96,12 @@ pthread_mutex_t idsToLookUpListMutex = PTHREAD_MUTEX_INITIALIZER;
  * declare and initialize the condition variable, threadPoolCondVar, 
  * for implementing a thread pool.
  */
+pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER; 
+
+/* TODO: Declare the mutex, threadPoolMutex, for protecting the thread pool
+ * condition variable. 
+ */
+pthread_mutex_t threadPoolMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t threadPoolCondVar = PTHREAD_COND_INITIALIZER;
 
 /* Declare the mutex, threadPoolMutex, for protecting the thread pool
@@ -335,64 +341,64 @@ void addIdsToLookUp(const int& id)
  * The thread pool function
  * @param thread argument
  */
-// void* threadPoolFunc(void* arg)
-// {
-// 	/* The id to process */
-// 	int id = -1; 
-	
-// 	/* Sleep until work arrives */
-// 	while(true)
-// 	{
-
-// 		/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
-		
-// 		/* Get the id to look up */
-// 		id = getIdsToLookUp();	
-			
-// 		/* No work to do */
-// 		while(id == -1)
-// 		{
-				
-			
-// 			/* TODO: Sleep on the condition variable threadPoolCondVar */
-			
-// 			/* Get the id to look up */
-// 			id = getIdsToLookUp();	
-			
-// 		}
-		
-		
-// 		/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
-		
-			
-// 		/* Look up id */
-// 		record rec = getHashTableRecord(id);
-		
-		
-// 		/* Send the record to the client */
-// 		sendRecord(msqid, rec);
-		
-// 	}
-	
-// }
 void* threadPoolFunc(void* arg)
 {
-	while (true)
+	/* The id to process */
+	int id = -1; 
+	
+	/* Sleep until work arrives */
+	while(true)
 	{
-		int id = getIdsToLookUp();
 
-		if (id == -1)
+		/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
+		pthread_mutex_lock(&threadPoolMutex);
+		/* Get the id to look up */
+		id = getIdsToLookUp();	
+			
+		/* No work to do */
+		while(id == -1)
 		{
-			usleep(1000);
-			continue;
+				
+			
+			/* TODO: Sleep on the condition variable threadPoolCondVar */
+			pthread_cond_wait(&threadPoolCondVar, &threadPoolMutex);
+			/* Get the id to look up */
+			id = getIdsToLookUp();	
+			
 		}
-
+		
+		
+		/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
+		pthread_mutex_unlock(&threadPoolMutex);
+			
+		/* Look up id */
 		record rec = getHashTableRecord(id);
+		
+		
+		/* Send the record to the client */
 		sendRecord(msqid, rec);
+		
 	}
+	
+// }
+// void* threadPoolFunc(void* arg)
+// {
+// 	while (true)
+// 	{
+// 		int id = getIdsToLookUp();
 
-	return NULL;
-}
+// 		if (id == -1)
+// 		{
+// 			usleep(1000);
+// 			continue;
+// 		}
+
+// 		record rec = getHashTableRecord(id);
+// 		sendRecord(msqid, rec);
+// 	}
+
+// 	return NULL;
+// }
 
 /**
  * Wakes up a thread from the thread pool
@@ -401,6 +407,11 @@ void wakeUpThread()
 {
 	
 
+	/* TODO: Lock the mutex protecting threadPoolCondVar from race conditions */
+	pthread_mutex_lock(&threadPoolMutex);
+	/* TODO: Wake up a thread sleeping on threadPoolCondVar */
+	pthread_cond_signal(&threadPoolCondVar);
+	/* TODO: Release the mutex protecting threadPoolCondVar from race conditions */
 	/* Lock the mutex protecting threadPoolCondVar from race conditions */
 	pthread_mutex_lock(&threadPoolMutex);
 
@@ -474,6 +485,8 @@ void processIncomingMessages()
 		/* Add id to the list of ids that should be processed */
 		addIdsToLookUp(msg.id);
 			
+		/* TODO: Wake up a thread to process the newly received id */
+		wakeUpThread();
 		/* Wake up a thread to process the newly received id */
 		pthread_cond_signal(&threadPoolCondVar);
 
