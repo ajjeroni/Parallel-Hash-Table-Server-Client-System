@@ -1,7 +1,7 @@
 # Parallel Hash Table Server-Client System
 
 Adan Jeronimo - ajjeroni@csu.fullerton.edu\
-Ryan Franson - \
+Ryan Franson - ryanfranson@csu.fullerton.edu\
 Aaron Davila - \
 Gary Samuel -  
 
@@ -11,6 +11,58 @@ This project implements a **multi-threaded server-client system** using a **para
 The server handles multiple client requests concurrently while ensuring safe access to shared data structures.
 
 ---
+
+## How to Execute the Program
+
+### 1. Compile the Programs
+Make sure you are in the project directory, then run:
+
+```bash
+make
+```
+This will compile both the server and client programs.
+
+### 2. Start the Server
+Run the server with:
+
+```bash
+./server namesDB.txt <NUMBER_OF_THREADS>
+```
+- namesDB.txt → input file containing records (id, first name, last name)
+- <NUMBER_OF_THREADS> → number of worker threads handling requests
+
+### 3. Start the Client 
+In a seperate terminal, run:
+
+```bash
+./client
+```
+The client will:
+- Generate random IDs
+- Send requests to the server
+- Receive and print matching records (if found)
+
+### 4. Expected Output
+Example client output:
+
+```bash
+messageType=2 id=46 firstName=Daniel lastName=Ariza
+messageType=2 id=62 firstName=Michael lastName=Busslinger
+messageType=2 id=31 firstName=Tommy lastName=Chao
+```
+
+- If a record does not exist, the server returns id = -1
+
+### 5. Stop the Program
+Press:
+
+```bash
+ctrl + c
+```
+
+- This should trigger cleanup (message queue removal, thread termination)
+
+## Implemented Extra Credit ✅
 
 ## Features
 - Multi-threaded server using pthreads
@@ -54,3 +106,4 @@ The server handles multiple client requests concurrently while ensuring safe acc
   - A mutex lock
 - Hash function:
   - index = record_id % 100
+
